@@ -2,9 +2,11 @@ import * as assert from 'assert';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import {
+  DATA_COUNT_SECTION_ID,
   parseWasmSections,
   stripCustomSections,
   stripDebugSections,
+  stripSectionsById,
   WasmFormatError,
 } from '../src/wasm/sections';
 import { WASM_HEADER, customSection, section, wasmModule } from './support/wasmBytes';
@@ -310,5 +312,49 @@ describe('stripCustomSections', () => {
 
     const tooShort = Uint8Array.from([0x00, 0x61, 0x73]);
     assert.throws(() => stripDebugSections(tooShort), WasmFormatError);
+  });
+});
+
+describe('stripSectionsById', () => {
+  // id 12 is DataCount; komet-node's parser rejects the module rather than
+  // skipping it, so the upload path drops it.
+  const bytes = wasmModule(
+    section(1, [0x60, 0x00, 0x00]),
+    customSection('.debug_info', [1, 2, 3]),
+    section(DATA_COUNT_SECTION_ID, [0x01]),
+    section(10, [0x01, 0x02, 0x00, 0x0b]),
+    section(11, [0x00]),
+  );
+
+  it('removes the DataCount section and keeps every other section', () => {
+    const out = stripSectionsById(bytes, [DATA_COUNT_SECTION_ID]);
+    assert.deepStrictEqual(
+      parseWasmSections(out).sections.map((s) => s.id),
+      [1, 0, 10, 11],
+    );
+  });
+
+  it('keeps the code section payload byte-identical', () => {
+    const out = stripSectionsById(bytes, [DATA_COUNT_SECTION_ID]);
+    assert.deepStrictEqual(codePayload(out), codePayload(bytes));
+  });
+
+  it('composes with stripDebugSections the way the upload path does', () => {
+    const out = stripSectionsById(stripDebugSections(bytes), [DATA_COUNT_SECTION_ID]);
+    assert.deepStrictEqual(
+      parseWasmSections(out).sections.map((s) => s.id),
+      [1, 10, 11],
+    );
+    assert.deepStrictEqual(codePayload(out), codePayload(bytes));
+  });
+
+  it('returns an equivalent module when no id matches', () => {
+    assert.deepStrictEqual(Array.from(stripSectionsById(bytes, [99])), Array.from(bytes));
+    assert.deepStrictEqual(Array.from(stripSectionsById(bytes, [])), Array.from(bytes));
+  });
+
+  it('throws WasmFormatError on a malformed header', () => {
+    const badMagic = Uint8Array.from([0x00, 0x61, 0x73, 0x00, 0x01, 0x00, 0x00, 0x00]);
+    assert.throws(() => stripSectionsById(badMagic, [DATA_COUNT_SECTION_ID]), WasmFormatError);
   });
 });

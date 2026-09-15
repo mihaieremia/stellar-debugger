@@ -32,7 +32,7 @@ import { Keypair } from '@stellar/stellar-sdk';
 import { KometClient, KometRpcError } from '../komet/KometClient';
 import { ContractBuilder } from '../build/ContractBuilder';
 import { SorobanTxBuilder } from '../soroban/SorobanTxBuilder';
-import { stripDebugSections } from '../wasm/sections';
+import { DATA_COUNT_SECTION_ID, stripDebugSections, stripSectionsById } from '../wasm/sections';
 import { toTraceRecords } from '../komet/trace';
 import { TraceModel } from '../debugAdapter/TraceModel';
 import { buildDebugArtifacts } from '../debugAdapter/artifacts';
@@ -170,9 +170,14 @@ export class SequenceRunner {
 
     // komet-node only executes the code; the DWARF custom sections just bloat
     // the KORE config it re-parses per RPC call, so strip them for the upload.
+    // The DataCount section (id 12) goes too: rustc emits it for larger
+    // contracts and komet-node's wasm parser raises `Invalid section id: 0xc`
+    // instead of skipping it, so the upload fails outright. Dropping it is safe
+    // for contracts that use active data segments and memory.copy/memory.fill;
+    // only memory.init/data.drop need the declared count.
     // The code section stays byte-identical, keeping trace `pos` aligned with
     // the full `wasm` used for debug artifacts.
-    const uploadWasm = stripDebugSections(wasm);
+    const uploadWasm = stripSectionsById(stripDebugSections(wasm), [DATA_COUNT_SECTION_ID]);
     report(`Uploading wasm for "${step.id}" (${wasm.length} bytes, ${uploadWasm.length} stripped) ...`);
     const upload = txBuilder.buildUploadWasm(source, Buffer.from(uploadWasm));
     await submit(`Upload "${step.id}"`, upload.envelopeXdr);
