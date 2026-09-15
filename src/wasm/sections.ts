@@ -140,6 +140,10 @@ export function stripDebugSections(bytes: Uint8Array): Uint8Array {
  * Used for the DataCount section (id 12): it is redundant metadata that only
  * pre-declares the data segment count, and komet-node's wasm parser rejects the
  * whole module rather than skipping an id it does not know.
+ *
+ * Note that dropping a section shifts the ABSOLUTE file offset of every section
+ * after it. Callers that hold offsets into the original buffer must re-parse the
+ * result rather than reuse them.
  */
 export function stripSectionsById(bytes: Uint8Array, ids: readonly number[]): Uint8Array {
   const drop = new Set(ids);

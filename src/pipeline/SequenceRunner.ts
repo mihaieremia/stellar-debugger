@@ -170,11 +170,17 @@ export class SequenceRunner {
 
     // komet-node only executes the code; the DWARF custom sections just bloat
     // the KORE config it re-parses per RPC call, so strip them for the upload.
-    // The DataCount section (id 12) goes too: rustc emits it for larger
-    // contracts and komet-node's wasm parser raises `Invalid section id: 0xc`
-    // instead of skipping it, so the upload fails outright. Dropping it is safe
-    // for contracts that use active data segments and memory.copy/memory.fill;
-    // only memory.init/data.drop need the declared count.
+    // The DataCount section (id 12) goes too: komet-node's wasm parser maps
+    // section ids 0x01..0x0b and raises `Invalid section id: 0xc` on anything
+    // else, so the upload fails outright. Whether rustc emits it depends on the
+    // toolchain and target features, not on contract size. Dropping it is safe
+    // because only memory.init/data.drop consult the declared count, and a
+    // contract built with active data segments uses neither.
+    // DataCount is ordered BEFORE the code section, so removing it shifts every
+    // later ABSOLUTE file offset. That is harmless here: komet's trace `pos` is
+    // relative to the payload of its own section, and Disassembly subtracts
+    // `codeSection.payloadStart` of whatever buffer it is given. Both sides stay
+    // payload-relative, and the debug artifacts read the full `wasm` anyway.
     // The code section stays byte-identical, keeping trace `pos` aligned with
     // the full `wasm` used for debug artifacts.
     const uploadWasm = stripSectionsById(stripDebugSections(wasm), [DATA_COUNT_SECTION_ID]);
